@@ -1,12 +1,12 @@
 /**
- * @name SpotifyTheme
+ * @name MusicTheme
  * @author Ambralin
  * @authorLink https://github.com/ambralin
- * @description Sets background colors based on current spotify song playing
- * @version 1.1.0
+ * @description Sets background colors based on the current song playing
+ * @version 1.2.0
  */
 
-module.exports = class SpotifyTheme {
+module.exports = class MusicTheme {
     constructor(meta) {
         this.Webpack = BdApi.Webpack;
         this.presenceStore = BdApi.Webpack.getStore("SelfPresenceStore");
@@ -30,13 +30,21 @@ module.exports = class SpotifyTheme {
 
     onPresenceChange = () => {
         const presences = this.presenceStore.getActivities();
+        console.log(presences);
 
-        const spotify = presences.find(a => a.name === "Spotify" && a.type === 2);
-        if (spotify?.timestamps?.start && typeof spotify.timestamps.start === "string") {
-            if(spotify["timestamps"]["start"].slice(0, -3) != this.currentSong) {
-                this.currentSong = spotify["timestamps"]["start"].slice(0, -3);
-                this.averageColorFromUrl(spotify["assets"]["large_image"].replace("spotify:", "https://i.scdn.co/image/")).then(color => {
-                    console.log(`spotifyColor - ${spotify["details"]} | ${color}`);
+        const songpresence = presences.find(a => (a.name === "Spotify" || a.name === "YouTube Music") && a.type === 2);
+        if (songpresence?.timestamps?.start && typeof songpresence.timestamps.start === "string") {
+            if(songpresence["timestamps"]["start"].slice(0, -3) != this.currentSong) {
+                this.currentSong = songpresence["timestamps"]["start"].slice(0, -3);
+                let imageUrl = "";
+                if( songpresence["name"] === "Spotify" ) {
+                    imageUrl = songpresence["assets"]["large_image"].replace("spotify:", "https://i.scdn.co/image/");
+                } else {
+                    imageUrl = "https://" + songpresence["assets"]["large_image"].split("/https/")[1];
+                }
+                //console.log(imageUrl);
+                this.averageColorFromUrl(imageUrl).then(color => {
+                    console.log(`spotifyColor - ${songpresence["details"]} | ${color}`);
 
                     const [r, g, b] = color;
                     const [h, s, l] = this.rgbToHsl(r, g, b);
