@@ -3,7 +3,7 @@
  * @author Ambralin
  * @authorLink https://github.com/ambralin
  * @description Sets background colors based on current spotify song playing
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 module.exports = class SpotifyTheme {
@@ -43,12 +43,17 @@ module.exports = class SpotifyTheme {
                     const style = document.createElement("style");
                     style.classList = "mystyles";
                     style.textContent = `
-                        .theme-darker {
+                        .theme-darker, .theme-darker * {
+                            transition: background-color 1000ms ease-out !important;
                             --background-base-low: ${this.hslToCss(h, s, l * 0.5)} !important;
                             --background-base-lower: ${this.hslToCss(h, s, l * 0.3)} !important;
                             --background-base-lowest: ${this.hslToCss(h, s, l * 0.2)} !important;
                             --background-surface-high: ${this.hslToCss(h, s, l * 0.45)} !important;
                             --chat-background-default: ${this.hslToCss(h, s, l * 0.45)} !important;
+                        }
+
+                        .theme-darker *:hover {
+                            transition: background-color 10ms ease-out !important;
                         }
                     `;
                     const laststyle = document.head.querySelector(".mystyles");
