@@ -1,143 +1,83 @@
 /**
  * @name MusicTheme
- * @author Ambralin
+ * @author Ambralin & kaan
  * @authorLink https://github.com/ambralin
- * @description Sets background colors based on the current song playing
- * @version 1.4.0
+ * @description Sets background colors based on the current song playing (huge thanks to kaan for optimizing presence implementation)
+ * @version 1.5.0
  * @donate paypal.me/dzelmanovic
  * @source https://github.com/Ambralin/MusicTheme_BD-Plugin/
  * @updateUrl https://github.com/Ambralin/MusicTheme_BD-Plugin/MusicTheme.plugin.js
  */
 
+const {Webpack, Patcher, Utils} = new BdApi("MusicTheme")
+const Dispatcher = Webpack.getByKeys("_dispatch", {searchExports: true})
+
+const MusicStore = new class MS extends Utils.Store {
+    #recentSong = {};
+
+    setSong(song) { this.#recentSong = song; }
+    didSongChange(newSong) { return newSong?.details !== this.#recentSong?.details; }
+    getSong() { return this.#recentSong; }
+}();
+
 module.exports = class MusicTheme {
-    constructor(meta) {
-        this.Webpack = BdApi.Webpack;
-        this.presenceStore = BdApi.Webpack.getStore("SelfPresenceStore");
-        this.onPresenceChange = this.onPresenceChange.bind(this);
-
-        this.currentSong = "nulltimestamp";
-    }
-
-    getSettingsPanel() {
-        const functionSwap = {
-            id: "oldFunc",
-            name: "Old Color Function",
-            type: "switch",
-            value: this.mySettings["oldFunc"]
-        };
-
-        return BdApi.UI.buildSettingsPanel({
-            onChange: (_, id, value) => {
-                this.mySettings[id] = value;
-                BdApi.Data.save("MusicTheme", "settings", this.mySettings);
-                this.onPresenceChange(true);
-            },
-            settings: [functionSwap]
-        });
-    }
-
     start() {
-        const myDefaults = {
-            oldFunc: false
-        };
-
-        this.mySettings = Object.assign({}, myDefaults, BdApi.Data.load("MusicTheme", "settings"));
-
-        if (!this.presenceStore) return;
-        this.presenceStore.addChangeListener(this.onPresenceChange);
-        this.onPresenceChange(true);
+        Dispatcher.subscribe('SELF_PRESENCE_STORE_UPDATE', this.onPresenceChange);
     }
 
     stop() {
-        if (!this.presenceStore) return;
-        this.presenceStore.removeChangeListener(this.onPresenceChange);
-        const ourstyle = document.head.querySelector(".mystyles");
-        if (ourstyle) { ourstyle.remove(); }
+        Dispatcher.unsubscribe('SELF_PRESENCE_STORE_UPDATE', this.onPresenceChange);
+        BdApi.DOM.removeStyle("MusicTheme");
+    }
+    
+    onPresenceChange = (dispatch) => {
+        const activities = dispatch.activities;
+        let activity = null;
+
+        activities.forEach(checkedactivity => {
+            if (checkedactivity.type == 2 && (checkedactivity.name == "YouTube Music" || checkedactivity.name == "Spotify")) 
+                activity = checkedactivity;
+        });
+
+        if (!activity || !activity.assets?.large_image) {
+            BdApi.DOM.removeStyle("MusicTheme");
+            MusicStore.setSong({});
+            return;
+        }
+
+        const didChange = MusicStore.didSongChange(activity);
+        MusicStore.setSong(activity);
+        if (!didChange) return;
+
+        let imageUrl = "";
+        if( activity.name === "Spotify" ) {
+            imageUrl = activity.assets.large_image.replace("spotify:", "https://i.scdn.co/image/");
+        } else {
+            imageUrl = "https://" + activity.assets.large_image.split("/https/")[1];
+        }
+        if (!imageUrl || imageUrl === "https://undefined") return;
+
+        console.log(`[MusicTheme] ${activity.details} by ${activity.state}`);
+
+        this.vibrantColorFromUrl(imageUrl)
+            .then(color => this.updateTheme(color))
+            .catch(e => console.warn("[MusicTheme]", e));
     }
 
-    onPresenceChange = (forcechange) => {
-        const presences = this.presenceStore.getActivities();
-
-        const songpresence = presences.find(a => (a.name === "Spotify" || a.name === "YouTube Music") && a.type === 2);
-        if (songpresence?.timestamps?.start && typeof songpresence.timestamps.start === "string") {
-            if(songpresence["timestamps"]["start"].slice(0, -3) != this.currentSong || forcechange) {
-                this.currentSong = songpresence["timestamps"]["start"].slice(0, -3);
-                let imageUrl = "";
-                if( songpresence["name"] === "Spotify" ) {
-                    imageUrl = songpresence["assets"]["large_image"].replace("spotify:", "https://i.scdn.co/image/");
-                } else {
-                    imageUrl = "https://" + songpresence["assets"]["large_image"].split("/https/")[1];
-                }
-                console.log(`musictheme | ${songpresence["details"]}`);
-                if(this.mySettings["oldFunc"]) {
-                    this.averageColorFromUrl(imageUrl).then(color => {this.updateTheme(color)});
-                } else {
-                    this.vibrantColorFromUrl(imageUrl).then(color => {this.updateTheme(color)});
-                }
-            }
-        } else {
-            const removestyle = document.head.querySelector(".mystyles");
-            if (removestyle) { removestyle.remove(); }
-        }
-    };
-
-    updateTheme(newColor) {
-        console.log(newColor);
-        const [r, g, b] = newColor;
+    updateTheme([r, g, b]) {
         const [h, s, l] = this.rgbToHsl(r, g, b);
-        const style = document.createElement("style");
-        style.classList = "mystyles";
-        style.textContent = `
+        BdApi.DOM.addStyle("MusicTheme", `
             .theme-darker, .theme-darker * {
                 transition: background-color 1000ms ease-out !important;
-                --background-base-low: ${this.hslToCss(h, s, l * 0.5)} !important;
-                --background-base-lower: ${this.hslToCss(h, s, l * 0.3)} !important;
-                --background-base-lowest: ${this.hslToCss(h, s, l * 0.2)} !important;
-                --background-surface-high: ${this.hslToCss(h, s, l * 0.45)} !important;
-                --chat-background-default: ${this.hslToCss(h, s, l * 0.45)} !important;
+                --background-base-low:      ${this.hslToCss(h, s, l * 0.50)} !important;
+                --background-base-lower:    ${this.hslToCss(h, s, l * 0.30)} !important;
+                --background-base-lowest:   ${this.hslToCss(h, s, l * 0.20)} !important;
+                --background-surface-high:  ${this.hslToCss(h, s, l * 0.45)} !important;
+                --chat-background-default:  ${this.hslToCss(h, s, l * 0.45)} !important;
             }
 
-            .theme-darker *:hover {
-                transition: background-color 10ms ease-out !important;
-            }
-        `;
-        const laststyle = document.head.querySelector(".mystyles");
-        if (laststyle) { laststyle.remove(); }
-        document.head.appendChild(style);
-    }
-
-    async averageColorFromUrl(url) {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.src = url;
-
-        return new Promise((resolve, reject) => {
-            img.onload = () => {
-                const canvas = document.createElement("canvas");
-                canvas.width = img.width;
-                canvas.height = img.height;
-                const ctx = canvas.getContext("2d");
-                ctx.drawImage(img, 0, 0);
-
-                const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-                let r = 0, g = 0, b = 0;
-                const pixels = data.length / 4;
-
-                for (let i = 0; i < data.length; i += 4) {
-                    r += data[i];
-                    g += data[i + 1];
-                    b += data[i + 2];
-                }
-
-                r = Math.round(r / pixels);
-                g = Math.round(g / pixels);
-                b = Math.round(b / pixels);
-
-                resolve([r, g, b]);
-            };
-
-            img.onerror = () => reject(new Error("Image load failed"));
-        });
+            .theme-darker *:hover { transition: background-color 10ms ease-out !important;
+        `);
     }
 
     async vibrantColorFromUrl(url, k = 4, maxIterations = 10, sampleSize = 5000) {
@@ -271,79 +211,6 @@ module.exports = class MusicTheme {
 
                 const [r, g, b] = centroids[bestCluster].map(v => Math.round(v));
                 resolve([r, g, b]);
-            };
-
-            img.onerror = () => reject(new Error("Image load failed"));
-        });
-    }
-
-
-
-    async accentColorFromUrl(url) {
-        const img = new Image();
-        img.crossOrigin = "anonymous";
-        img.src = url;
-
-        return new Promise((resolve, reject) => {
-            img.onload = () => {
-                const canvas = document.createElement("canvas");
-                canvas.width = img.width;
-                canvas.height = img.height;
-                const ctx = canvas.getContext("2d");
-                ctx.drawImage(img, 0, 0);
-
-                const data = ctx.getImageData(0, 0, canvas.width, canvas.height).data;
-
-                let r = 0, g = 0, b = 0, count = 0;
-                let rSkipped = 0, gSkipped = 0, bSkipped = 0, countSkipped = 0;
-
-                for (let i = 0; i < data.length; i += 4) {
-                    const rr = data[i];
-                    const gg = data[i + 1];
-                    const bb = data[i + 2];
-
-                    const [_, s, l] = this.rgbToHsl(rr, gg, bb);
-
-                    if (s < 15) {
-                        rSkipped += rr;
-                        gSkipped += gg;
-                        bSkipped += bb;
-                        countSkipped++;
-                        continue;
-                    }
-                    if (l < 20 || l > 80) {
-                        rSkipped += rr;
-                        gSkipped += gg;
-                        bSkipped += bb;
-                        countSkipped++;
-                        continue;
-                    }
-
-                    r += rr;
-                    g += gg;
-                    b += bb;
-                    count++;
-                }
-
-                // If the valid pixel count is too small (<5% of all pixels), fallback to all pixels
-                const totalPixels = data.length / 4;
-                if (countSkipped < totalPixels * 0.3) {
-                    r += rSkipped;
-                    g += gSkipped;
-                    b += bSkipped;
-                    count += countSkipped;
-                }
-
-                if (count === 0) {
-                    resolve([0, 0, 0]);
-                    return;
-                }
-
-                resolve([
-                    Math.round(r / count),
-                    Math.round(g / count),
-                    Math.round(b / count)
-                ]);
             };
 
             img.onerror = () => reject(new Error("Image load failed"));
